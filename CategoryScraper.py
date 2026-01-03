@@ -95,6 +95,7 @@ class CategoryScraper:
         subcategories = category_info['subcategories']
         
         category_data = {}
+        failed_subcats = []
         
         for subcat_name, t_param in subcategories.items():
             print(f"\n{'='*60}")
@@ -104,24 +105,35 @@ class CategoryScraper:
             url = self.build_url(c_param, t_param)
             print(f"URL: {url}")
             
-            # Use PropertyCardScraper to scrape this URL
-            scraper = PropertyCardScraper(url)
-            result = await scraper.scrape_cards()
-            
-            if result and result != "No cards found on this page.":
-                try:
-                    parsed_data = json.loads(result)
-                    category_data[subcat_name] = parsed_data
-                    print(f"Found {len(parsed_data)} items for {subcat_name}")
-                except json.JSONDecodeError as e:
-                    print(f"Error parsing JSON for {subcat_name}: {e}")
+            try:
+                # Use PropertyCardScraper to scrape this URL
+                scraper = PropertyCardScraper(url)
+                result = await scraper.scrape_cards()
+                
+                if result and result != "No cards found on this page.":
+                    try:
+                        parsed_data = json.loads(result)
+                        category_data[subcat_name] = parsed_data
+                        print(f"✓ Found {len(parsed_data)} items for {subcat_name}")
+                    except json.JSONDecodeError as e:
+                        print(f"ERROR: Failed to parse JSON for {subcat_name}: {e}")
+                        category_data[subcat_name] = []
+                        failed_subcats.append(subcat_name)
+                else:
+                    print(f"WARNING: No data found for {subcat_name}")
                     category_data[subcat_name] = []
-            else:
-                print(f"No data found for {subcat_name}")
+                    
+            except Exception as e:
+                print(f"ERROR: Failed to scrape {subcat_name}: {type(e).__name__}: {e}")
                 category_data[subcat_name] = []
+                failed_subcats.append(subcat_name)
             
             # Small delay between requests to be respectful
             await asyncio.sleep(2)
+        
+        # Summary for this category
+        if failed_subcats:
+            print(f"\n⚠ Warning: {len(failed_subcats)} subcategory(ies) failed: {', '.join(failed_subcats)}")
         
         return category_data
     
