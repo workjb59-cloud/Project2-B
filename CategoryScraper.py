@@ -18,10 +18,14 @@ class CategoryScraper:
     Creates Excel files with sheets for each subcategory.
     """
     
-    def __init__(self):
+    def __init__(self, debug=False):
         """
         Initialize category scraper with URL patterns and category definitions.
+        
+        Args:
+            debug: Enable debug mode to save screenshots and HTML
         """
+        self.debug = debug
         # Define category structure
         self.categories = {
             'rent': {
@@ -107,7 +111,7 @@ class CategoryScraper:
             
             try:
                 # Use PropertyCardScraper to scrape this URL
-                scraper = PropertyCardScraper(url)
+                scraper = PropertyCardScraper(url, debug=self.debug)
                 result = await scraper.scrape_cards()
                 
                 if result and result != "No cards found on this page.":
