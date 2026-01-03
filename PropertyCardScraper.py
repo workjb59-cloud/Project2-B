@@ -10,31 +10,49 @@ class PropertyCardScraper:
         self.browser = None
         self.context = None
 
-    async def scrape_cards(self):
+    async def scrape_cards(self, max_retries=2):
         async with async_playwright() as p:
             self.browser = await p.chromium.launch(headless=True)
             self.context = await self.browser.new_context()
             main_page = await self.context.new_page()
 
             try:
-                await main_page.goto(self.url)
-                await main_page.wait_for_selector('.relative.min-h-48', timeout=60000)
+                print(f"Navigating to {self.url}...")
+                await main_page.goto(self.url, wait_until='networkidle', timeout=30000)
+                
+                # Try to wait for cards with retry logic
+                for attempt in range(max_retries):
+                    try:
+                        await main_page.wait_for_selector('.relative.min-h-48', timeout=30000)
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            print(f"Attempt {attempt + 1} failed, retrying...")
+                            await asyncio.sleep(3)
+                        else:
+                            print(f"ERROR: Could not find cards after {max_retries} attempts")
+                            return "No cards found on this page."
 
                 # Scroll to load all posts
                 await self.scroll_to_bottom(main_page)
 
                 # Wait again to ensure all posts are loaded
-                await main_page.wait_for_selector('.relative.min-h-48')
+                try:
+                    await main_page.wait_for_selector('.relative.min-h-48', timeout=10000)
+                except:
+                    print("WARNING: Timeout waiting for cards after scroll, continuing anyway...")
 
                 # Get all card containers dynamically
                 posts = await main_page.query_selector_all('.relative.w-full.rounded-lg.card-shadow')
 
                 if not posts:
+                    print("No card containers found on page")
                     return "No cards found on this page."
 
+                print(f"Found {len(posts)} cards on page")
                 result = []
                 for index, post in enumerate(posts):
-                    print(f"\nProcessing card {index + 1}...")
+                    print(f"Processing card {index + 1}/{len(posts)}...")
 
                     # First get the title to use as identifier
                     title = await self.scrape_text(post, '.font-bold.text-lg.text-dark.line-clamp-2.break-words')
@@ -59,9 +77,13 @@ class PropertyCardScraper:
 
                 # Filter cards based on relative_date format "any number ساعة"
                 result = self.filter_by_relative_date(result)
-
+                
+                print(f"After filtering: {len(result)} cards remain")
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
+            except Exception as e:
+                print(f"ERROR in scrape_cards: {type(e).__name__}: {e}")
+                return "No cards found on this page."
             finally:
                 await self.browser.close()
 
@@ -245,26 +267,4 @@ class PropertyCardScraper:
             if len(date_texts) < 3:
                 print("Not enough cards to check for consecutive old dates.")
                 break
-
-    # async def scroll_to_bottom(self, page):
-    #     previous_height = await page.evaluate('document.body.scrollHeight')
-    #     while True:
-    #         await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-    #         await asyncio.sleep(2)
-    #         new_height = await page.evaluate('document.body.scrollHeight')
-    #         if new_height == previous_height:
-    #             break
-    #         previous_height = new_height
-
-
-# # Usage
-# async def main():
-#     url = "https://www.boshamlan.com/للبيع"
-#     scraper = CardScraper(url)
-#     result = await scraper.scrape_cards()
-#     print(result)
-#
-#
-# if __name__ == "__main__":
-#     asyncio.run(main())
 
