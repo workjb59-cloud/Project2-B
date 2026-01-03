@@ -5,10 +5,11 @@ from datetime import datetime, timedelta
 
 
 class PropertyCardScraper:
-    def __init__(self, url):
+    def __init__(self, url, debug=False):
         self.url = url
         self.browser = None
         self.context = None
+        self.debug = debug
 
     async def scrape_cards(self, max_retries=2):
         async with async_playwright() as p:
@@ -20,30 +21,57 @@ class PropertyCardScraper:
                 print(f"Navigating to {self.url}...")
                 await main_page.goto(self.url, wait_until='networkidle', timeout=30000)
                 
-                # Try to wait for cards with retry logic
-                for attempt in range(max_retries):
+                # Debug: Save screenshot and HTML to help identify selectors
+                if self.debug:
+                    await main_page.screenshot(path='debug_screenshot.png')
+                    html_content = await main_page.content()
+                    with open('debug_page.html', 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                    print("DEBUG: Saved screenshot and HTML for inspection")
+                
+                # Try multiple possible selectors
+                possible_selectors = [
+                    '.relative.min-h-48',  # Original selector
+                    'article',  # Common for cards
+                    '[class*="card"]',  # Any class containing "card"
+                    '[class*="property"]',  # Any class containing "property"
+                    '.grid > div',  # Grid items
+                    'a[href*="/property/"]',  # Links to properties
+                    'div[class*="listing"]',  # Listing containers
+                ]
+                
+                cards_selector = None
+                for selector in possible_selectors:
                     try:
-                        await main_page.wait_for_selector('.relative.min-h-48', timeout=30000)
-                        break
-                    except Exception as e:
-                        if attempt < max_retries - 1:
-                            print(f"Attempt {attempt + 1} failed, retrying...")
-                            await asyncio.sleep(3)
-                        else:
-                            print(f"ERROR: Could not find cards after {max_retries} attempts")
-                            return "No cards found on this page."
-
+                        elements = await main_page.query_selector_all(selector)
+                        if len(elements) > 0:
+                            print(f"✓ Found {len(elements)} elements with selector: {selector}")
+                            cards_selector = selector
+                            break
+                    except:
+                        continue
+                
+                if not cards_selector:
+                    print("ERROR: Could not find any cards with known selectors")
+                    print("Available classes on page:")
+                    # Get all unique classes on the page
+                    all_classes = await main_page.evaluate('''
+                        () => {
+                            const classes = new Set();
+                            document.querySelectorAll('*').forEach(el => {
+                                el.classList.forEach(cls => classes.add(cls));
+                            });
+                            return Array.from(classes).slice(0, 50);
+                        }
+                    ''')
+                    print(f"Sample classes: {', '.join(all_classes[:20])}")
+                    return "No cards found on this page."
+                
                 # Scroll to load all posts
                 await self.scroll_to_bottom(main_page)
 
-                # Wait again to ensure all posts are loaded
-                try:
-                    await main_page.wait_for_selector('.relative.min-h-48', timeout=10000)
-                except:
-                    print("WARNING: Timeout waiting for cards after scroll, continuing anyway...")
-
-                # Get all card containers dynamically
-                posts = await main_page.query_selector_all('.relative.w-full.rounded-lg.card-shadow')
+                # Get all card containers with the found selector
+                posts = await main_page.query_selector_all(cards_selector)
 
                 if not posts:
                     print("No card containers found on page")
@@ -267,4 +295,26 @@ class PropertyCardScraper:
             if len(date_texts) < 3:
                 print("Not enough cards to check for consecutive old dates.")
                 break
+
+    # async def scroll_to_bottom(self, page):
+    #     previous_height = await page.evaluate('document.body.scrollHeight')
+    #     while True:
+    #         await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+    #         await asyncio.sleep(2)
+    #         new_height = await page.evaluate('document.body.scrollHeight')
+    #         if new_height == previous_height:
+    #             break
+    #         previous_height = new_height
+
+
+# # Usage
+# async def main():
+#     url = "https://www.boshamlan.com/للبيع"
+#     scraper = CardScraper(url)
+#     result = await scraper.scrape_cards()
+#     print(result)
+#
+#
+# if __name__ == "__main__":
+#     asyncio.run(main())
 
