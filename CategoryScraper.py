@@ -60,15 +60,7 @@ class CategoryScraper:
         }
         
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        # Create partitioned directory structure: year=YYYY/month=MM/day=DD
-        now = datetime.now()
-        self.output_dir = os.path.join(
-            'scraped_data',
-            f'year={now.year}',
-            f'month={now.month:02d}',
-            f'day={now.day:02d}'
-        )
+        self.output_dir = 'scraped_data'
         os.makedirs(self.output_dir, exist_ok=True)
     
     def build_url(self, c_param, t_param):
