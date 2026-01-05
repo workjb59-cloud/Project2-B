@@ -40,23 +40,26 @@ class MainS3Scraper:
         Main execution method:
         1. Scrapes all categories and subcategories
         2. Creates Excel files with multiple sheets
-        3. Uploads to S3 with date partitioning
+        3. Uploads Excel files to S3 in 'excel files' folder
+        4. Uploads images to S3 in 'images' folder
         """
         print("="*80)
         print("BOSHAMLAN SCRAPER - S3 Edition")
         print("="*80)
         print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Target S3: s3://data-collection-dl/boshamlan-data/properties/")
+        print("  - Excel files -> excel files/")
+        print("  - Images -> images/")
         print("="*80)
         
         # Step 1: Check S3 bucket accessibility
-        print("\n[1/3] Checking S3 bucket accessibility...")
+        print("\n[1/4] Checking S3 bucket accessibility...")
         if not self.s3_uploader.check_bucket_exists():
             print("ERROR: Cannot access S3 bucket. Please check your AWS credentials and bucket permissions.")
             return
         
         # Step 2: Scrape all categories
-        print("\n[2/3] Scraping data from all categories...")
+        print("\n[2/4] Scraping data from all categories...")
         excel_files = await self.category_scraper.scrape_all_categories()
         
         if not excel_files:
@@ -67,24 +70,46 @@ class MainS3Scraper:
         for category, file_path in excel_files.items():
             print(f"  - {category}: {file_path}")
         
-        # Step 3: Upload to S3
-        print("\n[3/3] Uploading files to S3...")
+        # Step 3: Upload Excel files to S3
+        print("\n[3/4] Uploading Excel files to S3...")
         upload_results = self.s3_uploader.upload_multiple_files(excel_files)
         
         if upload_results:
-            print(f"\n✓ Successfully uploaded {len(upload_results)} file(s) to S3:")
+            print(f"\n✓ Successfully uploaded {len(upload_results)} Excel file(s) to S3:")
             for category, s3_uri in upload_results.items():
                 print(f"  - {category}: {s3_uri}")
         else:
-            print("\nERROR: Failed to upload files to S3.")
+            print("\nERROR: Failed to upload Excel files to S3.")
         
-        # Step 4: Summary
+        # Step 4: Upload images to S3
+        print("\n[4/4] Uploading images to S3...")
+        total_images = 0
+        for category_name in excel_files.keys():
+            # Load the scraped data from the category
+            category_data = self.category_scraper.categories.get(category_name)
+            if not category_data:
+                continue
+            
+            # Get all cards data for this category
+            all_cards = []
+            for subcat_name in category_data.get('subcategories', {}).keys():
+                # Read the data from the saved category_data
+                if hasattr(self.category_scraper, 'last_scraped_data'):
+                    subcat_data = self.category_scraper.last_scraped_data.get(category_name, {}).get(subcat_name, [])
+                    all_cards.extend(subcat_data)
+            
+            if all_cards:
+                image_results = await self.s3_uploader.upload_images_from_data(all_cards, category_name)
+                total_images += len(image_results)
+        
+        # Summary
         print("\n" + "="*80)
         print("SCRAPING COMPLETED")
         print("="*80)
         print(f"Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Categories processed: {len(excel_files)}")
-        print(f"Files uploaded to S3: {len(upload_results)}")
+        print(f"Excel files uploaded to S3: {len(upload_results)}")
+        print(f"Images uploaded to S3: {total_images}")
         print("="*80)
 
 

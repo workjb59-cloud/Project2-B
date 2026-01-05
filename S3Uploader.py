@@ -2,6 +2,9 @@ import boto3
 import os
 from datetime import datetime, timedelta
 from botocore.exceptions import ClientError, NoCredentialsError
+import aiohttp
+import asyncio
+from urllib.parse import urlparse
 
 
 class S3Uploader:
@@ -22,6 +25,8 @@ class S3Uploader:
         """
         self.bucket_name = bucket_name
         self.base_path = 'boshamlan-data/properties'
+        self.excel_folder = 'excel files'
+        self.images_folder = 'images'
         self.region_name = region_name
         
         # Get credentials from parameters or environment variables
@@ -74,8 +79,8 @@ class S3Uploader:
             now = datetime.now()
             date_partition = f"year={now.year}/month={now.month:02d}/day={now.day:02d}"
             
-            # Construct S3 key: boshamlan-data/properties/year=2026/month=01/day=05/rent.xlsx
-            s3_key = f"{self.base_path}/{date_partition}/{category_name}.xlsx"
+            # Construct S3 key: boshamlan-data/properties/year=2026/month=01/day=05/excel files/rent.xlsx
+            s3_key = f"{self.base_path}/{date_partition}/{self.excel_folder}/{category_name}.xlsx"
             
             print(f"Uploading {file_path} ({file_size_mb:.2f} MB) to S3...")
             
@@ -217,3 +222,132 @@ class S3Uploader:
         except Exception as e:
             print(f"ERROR: Unexpected error listing files: {e}")
             return []
+    
+    async def download_image(self, image_url, timeout=10):
+        """
+        Download an image from a URL.
+        
+        Args:
+            image_url: URL of the image to download
+            timeout: Request timeout in seconds
+        
+        Returns:
+            Tuple of (image_data, content_type) or (None, None) if failed
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+                        content_type = response.headers.get('Content-Type', 'image/jpeg')
+                        return image_data, content_type
+                    else:
+                        print(f"Failed to download image: HTTP {response.status}")
+                        return None, None
+        except Exception as e:
+            print(f"Error downloading image from {image_url}: {e}")
+            return None, None
+    
+    async def upload_image(self, image_url, filename=None, category_name=None):
+        """
+        Download and upload an image to S3 in the images folder.
+        
+        Args:
+            image_url: URL of the image to download and upload
+            filename: Optional custom filename. If not provided, generates from URL
+            category_name: Optional category name to organize images
+        
+        Returns:
+            S3 URI of the uploaded image or None if failed
+        """
+        try:
+            # Download the image
+            image_data, content_type = await self.download_image(image_url)
+            if not image_data:
+                return None
+            
+            # Generate filename if not provided
+            if not filename:
+                parsed_url = urlparse(image_url)
+                filename = os.path.basename(parsed_url.path)
+                if not filename or '.' not in filename:
+                    # Generate filename from timestamp if URL doesn't have a good filename
+                    ext = content_type.split('/')[-1] if '/' in content_type else 'jpg'
+                    filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.{ext}"
+            
+            # Get today's date for partitioning
+            now = datetime.now()
+            date_partition = f"year={now.year}/month={now.month:02d}/day={now.day:02d}"
+            
+            # Construct S3 key: boshamlan-data/properties/year=2026/month=01/day=05/images/[category]/filename.jpg
+            if category_name:
+                s3_key = f"{self.base_path}/{date_partition}/{self.images_folder}/{category_name}/{filename}"
+            else:
+                s3_key = f"{self.base_path}/{date_partition}/{self.images_folder}/{filename}"
+            
+            # Upload to S3
+            extra_args = {
+                'ContentType': content_type,
+                'Metadata': {
+                    'upload-date': datetime.now().isoformat(),
+                    'source-url': image_url[:1000],  # Limit length
+                    'source': 'boshamlan-scraper'
+                }
+            }
+            
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=image_data,
+                **extra_args
+            )
+            
+            s3_uri = f"s3://{self.bucket_name}/{s3_key}"
+            return s3_uri
+            
+        except Exception as e:
+            print(f"Error uploading image {image_url}: {e}")
+            return None
+    
+    async def upload_images_from_data(self, cards_data, category_name):
+        """
+        Upload all images from scraped card data.
+        
+        Args:
+            cards_data: List of card dictionaries with 'image_url' field
+            category_name: Category name for organizing images
+        
+        Returns:
+            Dictionary mapping original URLs to S3 URIs
+        """
+        if not cards_data:
+            return {}
+        
+        print(f"\nUploading images for category '{category_name}'...")
+        results = {}
+        
+        for i, card in enumerate(cards_data):
+            image_url = card.get('image_url')
+            if not image_url:
+                continue
+            
+            # Generate a unique filename based on card index and timestamp
+            title = card.get('title', '')
+            # Create a safe filename from title (first 30 chars)
+            safe_title = ''.join(c for c in title[:30] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+            if safe_title:
+                filename = f"{safe_title}_{i}.jpg"
+            else:
+                filename = f"property_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+            
+            print(f"  Uploading image {i+1}/{len(cards_data)}...")
+            s3_uri = await self.upload_image(image_url, filename, category_name)
+            
+            if s3_uri:
+                results[image_url] = s3_uri
+                print(f"    ✓ Uploaded to {s3_uri}")
+            else:
+                print(f"    ✗ Failed to upload image {i+1}")
+        
+        print(f"\n✓ Successfully uploaded {len(results)}/{len(cards_data)} images")
+        return results

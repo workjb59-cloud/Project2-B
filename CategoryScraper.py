@@ -22,6 +22,7 @@ class CategoryScraper:
             debug: Enable debug mode to save screenshots and HTML
         """
         self.debug = debug
+        self.last_scraped_data = {}  # Store scraped data for image uploading
         # Define category structure
         self.categories = {
             'rent': {
@@ -130,6 +131,9 @@ class CategoryScraper:
             
             # Small delay between requests to be respectful
             await asyncio.sleep(2)
+        
+        # Store the scraped data for later use (e.g., image uploading)
+        self.last_scraped_data[category_name] = category_data
         
         # Summary for this category
         if failed_subcats:
