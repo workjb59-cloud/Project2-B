@@ -70,10 +70,11 @@ class S3Uploader:
             file_size = os.path.getsize(file_path)
             file_size_mb = file_size / (1024 * 1024)
             
-            # Get today's date for partitioning
-            date_partition = datetime.now().strftime("%Y-%m-%d")
+            # Get today's date for partitioning: year=YYYY/month=MM/day=DD
+            now = datetime.now()
+            date_partition = f"year={now.year}/month={now.month:02d}/day={now.day:02d}"
             
-            # Construct S3 key: boshamlan-data/properties/2026-01-03/rent.xlsx
+            # Construct S3 key: boshamlan-data/properties/year=2026/month=01/day=05/rent.xlsx
             s3_key = f"{self.base_path}/{date_partition}/{category_name}.xlsx"
             
             print(f"Uploading {file_path} ({file_size_mb:.2f} MB) to S3...")
