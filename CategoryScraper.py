@@ -107,7 +107,7 @@ class CategoryScraper:
             
             try:
                 # Use PropertyCardScraper to scrape this URL
-                scraper = PropertyCardScraper(url, debug=self.debug)
+                scraper = PropertyCardScraper(url)
                 result = await scraper.scrape_cards()
                 
                 if result and result != "No cards found on this page.":
