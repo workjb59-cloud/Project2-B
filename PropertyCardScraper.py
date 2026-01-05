@@ -2,14 +2,14 @@ import asyncio
 from playwright.async_api import async_playwright
 import json
 from datetime import datetime, timedelta
+import aiohttp
 
 
 class PropertyCardScraper:
-    def __init__(self, url, debug=False):
+    def __init__(self, url):
         self.url = url
         self.browser = None
         self.context = None
-        self.debug = debug
 
     async def scrape_cards(self, max_retries=2):
         async with async_playwright() as p:
@@ -19,20 +19,15 @@ class PropertyCardScraper:
 
             try:
                 print(f"Navigating to {self.url}...")
-                await main_page.goto(self.url, wait_until='networkidle', timeout=30000)
+                await main_page.goto(self.url, wait_until='domcontentloaded', timeout=30000)
                 
-                # Debug: Save screenshot and HTML to help identify selectors
-                if self.debug:
-                    await main_page.screenshot(path='debug_screenshot.png')
-                    html_content = await main_page.content()
-                    with open('debug_page.html', 'w', encoding='utf-8') as f:
-                        f.write(html_content)
-                    print("DEBUG: Saved screenshot and HTML for inspection")
+                # Wait a bit for content to load
+                await main_page.wait_for_timeout(2000)
                 
                 # Try multiple possible selectors
                 possible_selectors = [
-                    '.relative.min-h-48',  # Original selector
-                    'article',  # Common for cards
+                    'article',  # Main card container (found via inspection)
+                    '.relative.min-h-48',  # Original selector (fallback)
                     '[class*="card"]',  # Any class containing "card"
                     '[class*="property"]',  # Any class containing "property"
                     '.grid > div',  # Grid items
@@ -82,31 +77,47 @@ class PropertyCardScraper:
                 for index, post in enumerate(posts):
                     print(f"Processing card {index + 1}/{len(posts)}...")
 
-                    # First get the title to use as identifier
-                    title = await self.scrape_text(post, '.font-bold.text-lg.text-dark.line-clamp-2.break-words')
-                    price = await self.scrape_text(post, '.rounded.font-bold.text-primary-dark')
-
-                    card_data = {
-                        'title': title,
-                        'price': price,
-                        'relative_date': await self.scrape_text(post, '.rounded.text-xs.flex.items-center.gap-1'),
-                        'description': await self.scrape_description(post),
-                        'image_url': await self.scrape_image(post),
-                        'link': await self.scrape_link(title, price)  # Pass identifying info
-                    }
-
-                    # Extract the mobile number and views number from the link page
-                    link = card_data['link']
-                    if link:
-                        card_data['mobile_number'] = await self.scrape_mobile_number(link)
-                        card_data['views_number'] = await self.scrape_views_number(link)
-
-                    result.append(card_data)
+                    # Get post ID and fetch data from API
+                    post_id = await post.get_attribute('data-post-id')
+                    
+                    if post_id:
+                        # Fetch all data from API endpoint
+                        api_data = await self.fetch_from_api(post_id)
+                        
+                        if api_data:
+                            # Build full URL from slug
+                            link = f"https://www.boshamlan.com{api_data.get('slug', '')}" if api_data.get('slug') else None
+                            
+                            card_data = {
+                                'title': api_data.get('title_ar'),
+                                'price': str(api_data.get('price', '')) if api_data.get('price') else None,
+                                'relative_date': await self.scrape_text(post, 'time span'),  # Still from HTML
+                                'description': api_data.get('description_ar'),
+                                'image_url': api_data.get('images', [{}])[0].get('path') if api_data.get('images') else None,
+                                'link': link,
+                                'mobile_number': api_data.get('contact'),
+                                'views_number': str(api_data.get('views', '')) if api_data.get('views') else None
+                            }
+                            
+                            result.append(card_data)
+                        else:
+                            print(f"  Failed to fetch API data for post {post_id}")
+                    else:
+                        print(f"  No post_id found for card {index + 1}")
 
                 # Filter cards based on relative_date format "any number ساعة"
+                print(f"\nSample data before filtering (first 3 cards):")
+                for i, card in enumerate(result[:3]):
+                    print(f"Card {i+1}:")
+                    title = card.get('title') or 'N/A'
+                    print(f"  Title: {title[:50] if len(title) > 50 else title}")
+                    print(f"  Price: {card.get('price') or 'N/A'}")
+                    print(f"  Relative Date: {card.get('relative_date') or 'N/A'}")
+                    print(f"  Link: {card.get('link') or 'N/A'}")
+                
                 result = self.filter_by_relative_date(result)
                 
-                print(f"After filtering: {len(result)} cards remain")
+                print(f"\nAfter filtering: {len(result)} cards remain")
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
             except Exception as e:
@@ -121,10 +132,13 @@ class PropertyCardScraper:
         """
         filtered_cards = []
         for card in cards:
-            relative_date = card.get('relative_date', '')
-            # Check if the relative date contains any number followed by 'ساعة'
-            if ('ساعة' in relative_date or 'دقيقة' in relative_date) and relative_date.split()[0].isdigit():
-                filtered_cards.append(card)
+            relative_date = card.get('relative_date', '') or ''
+            # Check if the relative date contains any number followed by 'ساعة' or 'دقيقة'
+            if relative_date and ('ساعة' in relative_date or 'دقيقة' in relative_date):
+                # Check if it starts with a digit
+                parts = relative_date.split()
+                if parts and parts[0].isdigit():
+                    filtered_cards.append(card)
         return filtered_cards
 
     async def scrape_text(self, post, selector):
@@ -138,7 +152,7 @@ class PropertyCardScraper:
 
     async def scrape_description(self, post):
         try:
-            description_element = await post.query_selector('.line-clamp-2:nth-of-type(2)')
+            description_element = await post.query_selector('p.text-sm.line-clamp-2')
             if description_element:
                 return await description_element.text_content()
         except Exception as e:
@@ -147,44 +161,116 @@ class PropertyCardScraper:
 
     async def scrape_image(self, post):
         try:
-            img_element = await post.query_selector('img[alt="Post"]')
+            # Images are in the first div with flex-shrink-0
+            img_element = await post.query_selector('img')
             if img_element:
                 return await img_element.get_attribute('src')
         except Exception as e:
             print(f"Failed to scrape image: {e}")
         return None
 
-    async def scrape_link(self, title, price):
+    async def fetch_from_api(self, post_id):
+        """
+        Fetch property data from the API endpoint.
+        API URL: https://api-v2.boshamlan.com/api/listings/{post_id}
+        Returns: dict with keys like slug, title_ar, description_ar, price, views, contact, images
+        """
+        try:
+            api_url = f"https://api-v2.boshamlan.com/api/listings/{post_id}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # The actual data is in data['data']
+                        return data.get('data', {})
+                    else:
+                        print(f"  API returned status {response.status} for post {post_id}")
+                        return None
+        except Exception as e:
+            print(f"  API error for post {post_id}: {e}")
+            return None
+
+    async def scrape_link_from_article(self, post):
+        """
+        Get the property link using JavaScript click and route listener.
+        """
         new_page = None
         try:
-            # Create a new page and navigate to the main URL
+            # Get the post ID from the current card
+            post_id = await post.get_attribute('data-post-id')
+            if not post_id:
+                print("  No data-post-id found")
+                return None
+            
+            # Create a new page and navigate to the search URL
             new_page = await self.context.new_page()
-            await new_page.goto(self.url)
-
+            
+            # Set up a route listener to capture navigation
+            captured_url = {'url': None}
+            
+            async def route_handler(route):
+                # Capture the URL being navigated to
+                url = route.request.url
+                if post_id in url:
+                    captured_url['url'] = url
+                await route.continue_()
+            
+            # Listen for all navigation requests
+            await new_page.route('**/*', route_handler)
+            
+            await new_page.goto(self.url, wait_until='load')
+            
+            # Wait for JavaScript and Svelte to be ready
+            await new_page.wait_for_timeout(3000)
+            
             # Wait for cards to load
-            await new_page.wait_for_selector('.relative.min-h-48')
-
-            # Find the card with matching title and price
-            card_selector = f"div.relative.w-full.rounded-lg.card-shadow:has(.font-bold.text-lg.text-dark.line-clamp-2.break-words:text-is(\"{title}\"))"
-            matching_card = await new_page.wait_for_selector(card_selector)
-
+            await new_page.wait_for_selector('article[data-post-id]', timeout=10000)
+            
+            # Find the card with matching post-id
+            card_selector = f'article[data-post-id="{post_id}"]'
+            matching_card = await new_page.wait_for_selector(card_selector, timeout=10000)
+            
             if matching_card:
-                # Set up navigation listener
-                async with new_page.expect_navigation(timeout=5000, wait_until='networkidle') as navigation_info:
-                    await matching_card.click()
-                    try:
-                        await navigation_info.value
-                        final_url = new_page.url
+                # Store initial URL
+                initial_url = new_page.url
+                
+                # Scroll card into view
+                await matching_card.scroll_into_view_if_needed()
+                await new_page.wait_for_timeout(500)
+                
+                # Try JavaScript click first
+                await new_page.evaluate(f'''() => {{
+                    const card = document.querySelector('article[data-post-id="{post_id}"]');
+                    if (card) {{
+                        card.click();
+                    }}
+                }}''')
+                
+                # Wait for URL change
+                for i in range(50):  # 5 seconds
+                    await new_page.wait_for_timeout(100)
+                    current_url = new_page.url
+                    
+                    # Check if URL changed
+                    if current_url != initial_url:
+                        print(f"  Got URL: {current_url}")
                         await new_page.close()
-                        return final_url
-                    except Exception as e:
-                        print(f"Navigation failed: {e}")
-
+                        return current_url
+                    
+                    # Check if we captured it via route
+                    if captured_url['url']:
+                        print(f"  Got URL from route: {captured_url['url']}")
+                        await new_page.close()
+                        return captured_url['url']
+                
+                print(f"  URL didn't change after clicking")
+            
             await new_page.close()
             return None
 
         except Exception as e:
-            print(f"Failed to scrape link: {e}")
+            print(f"  Failed to scrape link: {e}")
             if new_page:
                 try:
                     await new_page.close()
@@ -192,48 +278,10 @@ class PropertyCardScraper:
                     pass
             return None
 
-    async def scrape_mobile_number(self, link):
-        new_page = None
-        try:
-            # Create a new page and navigate to the link
-            new_page = await self.context.new_page()
-            await new_page.goto(link)
-
-            # Find the mobile number anchor inside the specific div
-            mobile_element = await new_page.query_selector('.flex.gap-3.justify-center a')
-            if mobile_element:
-                mobile_number = await mobile_element.get_attribute('href')
-                # Extract the number from the href (assuming it starts with tel:)
-                if mobile_number and mobile_number.startswith('tel:'):
-                    return mobile_number[4:]
-        except Exception as e:
-            print(f"Failed to scrape mobile number: {e}")
-
-        return None
-
-    async def scrape_views_number(self, link):
-        new_page = None
-        try:
-            # Create a new page and navigate to the link
-            new_page = await self.context.new_page()
-            await new_page.goto(link)
-            await new_page.wait_for_selector(
-                '.flex.items-center.justify-center.gap-1.rounded.bg-whitish-transparent.py-1.px-1\\.5.text-xs.min-w-\\[62px\\] div',
-                timeout=10000)
-
-            # Find the views number
-            views_element = await new_page.query_selector(
-                '.flex.items-center.justify-center.gap-1.rounded.bg-whitish-transparent.py-1.px-1\\.5.text-xs.min-w-\\[62px\\] div')
-            if views_element:
-                views_number = await views_element.text_content()
-                return views_number.strip() if views_number else None
-            else:
-                print("Views element not found!")
-                return None
-        except Exception as e:
-            print(f"Failed to scrape views number: {e}")
-
-        return None
+    # No longer needed - data comes from API
+    # async def scrape_link_from_article(self, post):
+    # async def scrape_mobile_number(self, link, page):
+    # async def scrape_views_number(self, link, page):
 
     async def scroll_to_bottom(self, page):
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -295,26 +343,4 @@ class PropertyCardScraper:
             if len(date_texts) < 3:
                 print("Not enough cards to check for consecutive old dates.")
                 break
-
-    # async def scroll_to_bottom(self, page):
-    #     previous_height = await page.evaluate('document.body.scrollHeight')
-    #     while True:
-    #         await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-    #         await asyncio.sleep(2)
-    #         new_height = await page.evaluate('document.body.scrollHeight')
-    #         if new_height == previous_height:
-    #             break
-    #         previous_height = new_height
-
-
-# # Usage
-# async def main():
-#     url = "https://www.boshamlan.com/للبيع"
-#     scraper = CardScraper(url)
-#     result = await scraper.scrape_cards()
-#     print(result)
-#
-#
-# if __name__ == "__main__":
-#     asyncio.run(main())
 
