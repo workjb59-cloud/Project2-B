@@ -141,13 +141,14 @@ class CategoryScraper:
         
         return category_data
     
-    def save_to_excel(self, category_name, category_data):
+    def save_to_excel(self, category_name, category_data, image_s3_mapping=None):
         """
         Save category data to Excel file with multiple sheets for subcategories.
         
         Args:
             category_name: Name of the category ('rent', 'sale', or 'exchange')
             category_data: Dictionary with subcategory names and their data
+            image_s3_mapping: Dictionary mapping image URLs to S3 URIs
         
         Returns:
             Path to the saved Excel file or None if failed
@@ -163,6 +164,15 @@ class CategoryScraper:
             with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
                 for subcat_name, data in category_data.items():
                     if data:  # Only create sheet if there's data
+                        # Add image_s3_path column if we have image mappings
+                        if image_s3_mapping:
+                            for item in data:
+                                image_url = item.get('image_url')
+                                if image_url and image_url in image_s3_mapping:
+                                    item['image_s3_path'] = image_s3_mapping[image_url]
+                                else:
+                                    item['image_s3_path'] = None
+                        
                         df = pd.json_normalize(data)
                         # Excel sheet names have a 31 character limit
                         sheet_name = subcat_name[:31]
@@ -171,7 +181,7 @@ class CategoryScraper:
                     else:
                         # Create an empty sheet with headers
                         df = pd.DataFrame(columns=['title', 'price', 'relative_date', 'description', 
-                                                  'image_url', 'link', 'mobile_number', 'views_number'])
+                                                  'image_url', 'link', 'mobile_number', 'views_number', 'image_s3_path'])
                         sheet_name = subcat_name[:31]
                         df.to_excel(writer, sheet_name=sheet_name, index=False)
                         print(f"Added empty sheet '{sheet_name}'")
@@ -183,9 +193,12 @@ class CategoryScraper:
             print(f"Error saving Excel file for {category_name}: {e}")
             return None
     
-    async def scrape_all_categories(self):
+    async def scrape_all_categories(self, image_s3_mappings=None):
         """
         Scrape all main categories (rent, sale, exchange) and save to Excel files.
+        
+        Args:
+            image_s3_mappings: Dictionary with category names as keys and image URL->S3 URI mappings as values
         
         Returns:
             Dictionary with category names and their Excel file paths
@@ -200,7 +213,12 @@ class CategoryScraper:
             category_data = await self.scrape_category(category_name)
             
             if category_data:
-                file_path = self.save_to_excel(category_name, category_data)
+                # Get image mappings for this category if available
+                category_image_mapping = None
+                if image_s3_mappings and category_name in image_s3_mappings:
+                    category_image_mapping = image_s3_mappings[category_name]
+                
+                file_path = self.save_to_excel(category_name, category_data, category_image_mapping)
                 if file_path:
                     excel_files[category_name] = file_path
             
