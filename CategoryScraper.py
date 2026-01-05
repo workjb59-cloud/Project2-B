@@ -2,10 +2,6 @@ import asyncio
 import sys
 import os
 from pathlib import Path
-
-# Add parent directory to path to import PropertyCardScraper
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from PropertyCardScraper import PropertyCardScraper
 import json
 import pandas as pd
