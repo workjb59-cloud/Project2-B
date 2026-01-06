@@ -74,19 +74,16 @@ class OfficeDataPipeline:
         
         excel_path = os.path.join(output_dir, f"{safe_name}.xlsx")
         
-        # Create info sheet data
+        # Create info sheet data with columns as headers
         info_data = {
-            'Field': ['Name', 'URL', 'Description', 'Telephone', 'Email', 'Image', 'Instagram', 'Website'],
-            'Value': [
-                office_data.get('name', ''),
-                office_data.get('url', ''),
-                office_data.get('description', ''),
-                office_data.get('telephone', ''),
-                office_data.get('email', ''),
-                office_data.get('image', ''),
-                office_data.get('instagram', ''),
-                office_data.get('website', '')
-            ]
+            'Name': [office_data.get('name', '')],
+            'URL': [office_data.get('url', '')],
+            'Description': [office_data.get('description', '')],
+            'Telephone': [office_data.get('telephone', '')],
+            'Email': [office_data.get('email', '')],
+            'Image': [office_data.get('image', '')],
+            'Instagram': [office_data.get('instagram', '')],
+            'Website': [office_data.get('website', '')]
         }
         df_info = pd.DataFrame(info_data)
         

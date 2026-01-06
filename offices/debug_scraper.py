@@ -129,19 +129,16 @@ async def test_scraper():
                         try:
                             os.makedirs('debug_output', exist_ok=True)
                             
-                            # Create info sheet
+                            # Create info sheet with columns as headers
                             info_data = {
-                                'Field': ['Name', 'URL', 'Description', 'Telephone', 'Email', 'Image', 'Instagram', 'Website'],
-                                'Value': [
-                                    test_office.get('name', ''),
-                                    test_office.get('url', ''),
-                                    test_office.get('description', ''),
-                                    test_office.get('telephone', ''),
-                                    test_office.get('email', ''),
-                                    test_office.get('image', ''),
-                                    test_office.get('instagram', ''),
-                                    test_office.get('website', '')
-                                ]
+                                'Name': [test_office.get('name', '')],
+                                'URL': [test_office.get('url', '')],
+                                'Description': [test_office.get('description', '')],
+                                'Telephone': [test_office.get('telephone', '')],
+                                'Email': [test_office.get('email', '')],
+                                'Image': [test_office.get('image', '')],
+                                'Instagram': [test_office.get('instagram', '')],
+                                'Website': [test_office.get('website', '')]
                             }
                             df_info = pd.DataFrame(info_data)
                             
