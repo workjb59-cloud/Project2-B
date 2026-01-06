@@ -1,0 +1,270 @@
+import asyncio
+import os
+import sys
+from datetime import datetime, timedelta
+import shutil
+import pandas as pd
+
+# Add parent directory to path to import modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from offices.OfficeScraper import OfficeScraper
+from offices.OfficeS3Uploader import OfficeS3Uploader
+
+
+class OfficeDataPipeline:
+    """
+    Complete pipeline for scraping office data, generating Excel files, and uploading to S3.
+    """
+    
+    def __init__(self, aws_access_key_id=None, aws_secret_access_key=None, region_name='us-east-1'):
+        """
+        Initialize the pipeline.
+        
+        Args:
+            aws_access_key_id: AWS access key (optional)
+            aws_secret_access_key: AWS secret key (optional)
+            region_name: AWS region name
+        """
+        self.scraper = OfficeScraper()
+        self.s3_uploader = OfficeS3Uploader(
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            region_name=region_name
+        )
+        self.temp_dir = 'temp_offices_excel'
+    
+    def _clean_filename(self, name):
+        """
+        Clean office name to create valid filename.
+        
+        Args:
+            name: Office name
+            
+        Returns:
+            Cleaned filename
+        """
+        # Remove or replace invalid characters
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            name = name.replace(char, '_')
+        
+        # Limit length
+        if len(name) > 100:
+            name = name[:100]
+        
+        # Remove leading/trailing spaces
+        name = name.strip()
+        
+        return name
+    
+    def generate_office_excel(self, office_data, output_dir):
+        """
+        Generate Excel file for a single office using pandas.
+        
+        Args:
+            office_data: Dictionary containing office info and listings
+            output_dir: Directory to save Excel file
+            
+        Returns:
+            Path to the generated Excel file
+        """
+        office_name = office_data.get('name', 'Unknown Office')
+        safe_name = self._clean_filename(office_name)
+        
+        excel_path = os.path.join(output_dir, f"{safe_name}.xlsx")
+        
+        # Create info sheet data
+        info_data = {
+            'Field': ['Name', 'URL', 'Description', 'Telephone', 'Email', 'Image', 'Instagram', 'Website'],
+            'Value': [
+                office_data.get('name', ''),
+                office_data.get('url', ''),
+                office_data.get('description', ''),
+                office_data.get('telephone', ''),
+                office_data.get('email', ''),
+                office_data.get('image', ''),
+                office_data.get('instagram', ''),
+                office_data.get('website', '')
+            ]
+        }
+        df_info = pd.DataFrame(info_data)
+        
+        # Create main sheet data
+        listings = office_data.get('listings', [])
+        main_data = []
+        for listing in listings:
+            main_data.append({
+                'Name': listing.get('name', ''),
+                'URL': listing.get('url', ''),
+                'Description': listing.get('description', ''),
+                'Image URL': listing.get('image_url', ''),
+                'Price': listing.get('price', ''),
+                'Address Region': listing.get('addressRegion', ''),
+                'Address Locality': listing.get('addressLocality', ''),
+                'Views': listing.get('views', ''),
+                'Date Published': listing.get('datePublished', '')
+            })
+        df_main = pd.DataFrame(main_data)
+        
+        # Write to Excel with two sheets
+        with pd.ExcelWriter(excel_path, engine='xlsxwriter') as writer:
+            df_info.to_excel(writer, sheet_name='info', index=False)
+            df_main.to_excel(writer, sheet_name='main', index=False)
+        
+        print(f"Generated Excel file: {excel_path}")
+        return excel_path
+    
+    async def run_pipeline(self, filter_date=None, upload_to_s3=True):
+        """
+        Run the complete pipeline.
+        
+        Args:
+            filter_date: Date to filter listings (default: yesterday)
+            upload_to_s3: Whether to upload to S3 (default: True)
+            
+        Returns:
+            Dictionary with pipeline results
+        """
+        # Default to yesterday
+        if filter_date is None:
+            filter_date = datetime.now() - timedelta(days=1)
+        
+        print("="*80)
+        print(f"OFFICE DATA PIPELINE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("="*80)
+        print(f"Filter date: {filter_date.strftime('%Y-%m-%d')}")
+        print(f"Upload to S3: {upload_to_s3}")
+        print("="*80 + "\n")
+        
+        # Step 1: Scrape office data
+        print("STEP 1: Scraping office data from boshamlan.com")
+        print("-" * 80)
+        
+        offices_data = await self.scraper.scrape_all_offices(filter_date=filter_date)
+        
+        if not offices_data:
+            print("\n⚠ No offices found with listings from the specified date")
+            return {
+                'success': False,
+                'message': 'No offices found with listings from the specified date',
+                'offices_count': 0,
+                'files_generated': 0,
+                'files_uploaded': 0
+            }
+        
+        print(f"\n✓ Found {len(offices_data)} offices with listings from {filter_date.strftime('%Y-%m-%d')}")
+        
+        total_listings = sum(len(office.get('listings', [])) for office in offices_data)
+        print(f"✓ Total listings: {total_listings}")
+        
+        # Step 2: Generate Excel files
+        print("\n" + "="*80)
+        print("STEP 2: Generating Excel files")
+        print("-" * 80)
+        
+        # Create temporary directory for Excel files
+        os.makedirs(self.temp_dir, exist_ok=True)
+        
+        excel_files = []
+        for office in offices_data:
+            try:
+                file_path = self.generate_office_excel(office, self.temp_dir)
+                excel_files.append(file_path)
+            except Exception as e:
+                office_name = office.get('name', 'Unknown')
+                print(f"Error generating Excel for {office_name}: {e}")
+        
+        print(f"\n✓ Generated {len(excel_files)} Excel files")
+        
+        # Step 3: Upload to S3
+        uploaded_urls = []
+        
+        if upload_to_s3 and excel_files:
+            print("\n" + "="*80)
+            print("STEP 3: Uploading to S3")
+            print("-" * 80)
+            
+            # Use the filter date for S3 partitioning
+            uploaded_urls = self.s3_uploader.upload_multiple_files(
+                excel_files, 
+                upload_date=filter_date
+            )
+            
+            print(f"\n✓ Uploaded {len(uploaded_urls)} files to S3")
+        else:
+            print("\n⚠ Skipping S3 upload")
+        
+        # Step 4: Cleanup
+        print("\n" + "="*80)
+        print("STEP 4: Cleanup")
+        print("-" * 80)
+        
+        if upload_to_s3:
+            # Remove temporary directory
+            try:
+                shutil.rmtree(self.temp_dir)
+                print(f"✓ Removed temporary directory: {self.temp_dir}")
+            except Exception as e:
+                print(f"⚠ Could not remove temporary directory: {e}")
+        else:
+            print(f"✓ Excel files saved locally in: {self.temp_dir}")
+        
+        # Summary
+        print("\n" + "="*80)
+        print("PIPELINE SUMMARY")
+        print("="*80)
+        print(f"Offices processed: {len(offices_data)}")
+        print(f"Total listings: {total_listings}")
+        print(f"Excel files generated: {len(excel_files)}")
+        print(f"Files uploaded to S3: {len(uploaded_urls)}")
+        
+        if uploaded_urls:
+            print(f"\nS3 Location:")
+            # Show the directory structure
+            if uploaded_urls:
+                first_url = uploaded_urls[0]
+                s3_dir = '/'.join(first_url.split('/')[:-1])
+                print(f"  {s3_dir}/")
+        
+        print("="*80 + "\n")
+        
+        return {
+            'success': True,
+            'offices_count': len(offices_data),
+            'total_listings': total_listings,
+            'files_generated': len(excel_files),
+            'files_uploaded': len(uploaded_urls),
+            'uploaded_urls': uploaded_urls,
+            'local_files': excel_files if not upload_to_s3 else []
+        }
+
+
+async def main():
+    """
+    Main entry point for the office data pipeline.
+    """
+    # You can configure AWS credentials here or use environment variables
+    # AWS credentials will be read from environment variables if not provided
+    
+    pipeline = OfficeDataPipeline(
+        # aws_access_key_id='YOUR_ACCESS_KEY',  # Optional
+        # aws_secret_access_key='YOUR_SECRET_KEY',  # Optional
+        region_name='us-east-1'
+    )
+    
+    # Run pipeline for yesterday's data (default)
+    # You can also specify a custom date:
+    # custom_date = datetime(2026, 1, 5)
+    # results = await pipeline.run_pipeline(filter_date=custom_date)
+    
+    results = await pipeline.run_pipeline()
+    
+    if results['success']:
+        print("✓ Pipeline completed successfully!")
+    else:
+        print("✗ Pipeline completed with warnings")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

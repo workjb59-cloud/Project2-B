@@ -1,0 +1,366 @@
+import asyncio
+from playwright.async_api import async_playwright
+import json
+from datetime import datetime, timedelta
+import re
+from bs4 import BeautifulSoup
+
+
+class OfficeScraper:
+    """
+    Scrapes office data from boshamlan.com/agents and their listings.
+    Extracts office information, listings, and view counts.
+    """
+    
+    def __init__(self):
+        self.base_url = "https://www.boshamlan.com"
+        self.agents_url = f"{self.base_url}/agents"
+        self.browser = None
+        self.context = None
+    
+    async def scrape_all_offices(self, filter_date=None):
+        """
+        Scrape all offices and their listings.
+        
+        Args:
+            filter_date: Date to filter listings (default: yesterday)
+            
+        Returns:
+            List of office dictionaries with info and listings
+        """
+        if filter_date is None:
+            filter_date = datetime.now() - timedelta(days=1)
+        
+        filter_date_str = filter_date.strftime('%Y-%m-%d')
+        print(f"Filtering listings from date: {filter_date_str}")
+        
+        async with async_playwright() as p:
+            self.browser = await p.chromium.launch(headless=True)
+            self.context = await self.browser.new_context()
+            
+            try:
+                # Step 1: Get all offices from main agents page
+                offices_data = await self.scrape_agents_page()
+                print(f"Found {len(offices_data)} offices")
+                
+                # Step 2: For each office, get their listings
+                all_offices = []
+                for idx, office in enumerate(offices_data, 1):
+                    print(f"\n[{idx}/{len(offices_data)}] Processing office: {office['name']}")
+                    
+                    # Get listings for this office
+                    listings = await self.scrape_office_listings(office['url'], filter_date_str)
+                    
+                    if listings:
+                        print(f"  Found {len(listings)} listings from {filter_date_str}")
+                        
+                        # Step 3: Get view counts for each listing
+                        for listing_idx, listing in enumerate(listings, 1):
+                            print(f"  Getting views for listing {listing_idx}/{len(listings)}: {listing['name'][:50]}...")
+                            views = await self.scrape_listing_views(listing['url'])
+                            listing['views'] = views
+                            await asyncio.sleep(0.5)  # Rate limiting
+                        
+                        office['listings'] = listings
+                        all_offices.append(office)
+                    else:
+                        print(f"  No listings found from {filter_date_str}, skipping office")
+                    
+                    # Rate limiting between offices
+                    await asyncio.sleep(1)
+                
+                return all_offices
+                
+            finally:
+                await self.context.close()
+                await self.browser.close()
+    
+    async def scrape_agents_page(self):
+        """
+        Scrape the main agents page to get all offices.
+        Extracts JSON-LD data from the page.
+        
+        Returns:
+            List of office dictionaries
+        """
+        page = await self.context.new_page()
+        
+        try:
+            print(f"Loading agents page: {self.agents_url}")
+            await page.goto(self.agents_url, wait_until='domcontentloaded', timeout=30000)
+            await page.wait_for_timeout(2000)
+            
+            # Get page content
+            content = await page.content()
+            
+            # Parse JSON-LD data
+            offices = self._extract_offices_from_html(content)
+            
+            return offices
+            
+        finally:
+            await page.close()
+    
+    def _extract_offices_from_html(self, html_content):
+        """
+        Extract office data from JSON-LD in HTML.
+        
+        Args:
+            html_content: HTML content of the page
+            
+        Returns:
+            List of office dictionaries
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        offices = []
+        
+        # Find all script tags with type="application/ld+json"
+        scripts = soup.find_all('script', type='application/ld+json')
+        
+        for script in scripts:
+            try:
+                data = json.loads(script.string)
+                
+                # Handle @graph structure
+                if '@graph' in data:
+                    for item in data['@graph']:
+                        if item.get('@type') == 'ItemList' and 'itemListElement' in item:
+                            # This is the offices list
+                            for element in item['itemListElement']:
+                                if element.get('@type') == 'ListItem':
+                                    office_item = element.get('item', {})
+                                    if office_item.get('@type') == 'RealEstateAgent':
+                                        office_data = self._parse_office_data(office_item)
+                                        offices.append(office_data)
+                elif data.get('@type') == 'ItemList' and 'itemListElement' in data:
+                    # Direct ItemList structure
+                    for element in data['itemListElement']:
+                        if element.get('@type') == 'ListItem':
+                            office_item = element.get('item', {})
+                            if office_item.get('@type') == 'RealEstateAgent':
+                                office_data = self._parse_office_data(office_item)
+                                offices.append(office_data)
+            except json.JSONDecodeError:
+                continue
+        
+        return offices
+    
+    def _parse_office_data(self, office_item):
+        """
+        Parse office data from JSON-LD item.
+        
+        Args:
+            office_item: Office data from JSON-LD
+            
+        Returns:
+            Dictionary with office information
+        """
+        contact_point = office_item.get('contactPoint', [{}])[0] if office_item.get('contactPoint') else {}
+        
+        office_data = {
+            'url': office_item.get('url', ''),
+            'name': office_item.get('name', ''),
+            'description': office_item.get('description', ''),
+            'image': office_item.get('image', ''),
+            'telephone': contact_point.get('telephone', ''),
+            'email': contact_point.get('email', ''),
+            'instagram': '',
+            'website': ''
+        }
+        
+        # Extract social media links
+        same_as = office_item.get('sameAs', [])
+        for link in same_as:
+            if 'instagram.com' in link:
+                office_data['instagram'] = link
+            elif link and 'boshamlan.com' not in link:
+                office_data['website'] = link
+        
+        return office_data
+    
+    async def scrape_office_listings(self, office_url, filter_date_str):
+        """
+        Scrape listings from an office page.
+        
+        Args:
+            office_url: URL of the office page
+            filter_date_str: Date string to filter listings (YYYY-MM-DD)
+            
+        Returns:
+            List of listing dictionaries
+        """
+        page = await self.context.new_page()
+        
+        try:
+            print(f"  Loading office page: {office_url}")
+            await page.goto(office_url, wait_until='domcontentloaded', timeout=30000)
+            await page.wait_for_timeout(2000)
+            
+            # Get page content
+            content = await page.content()
+            
+            # Parse JSON-LD data
+            listings = self._extract_listings_from_html(content, filter_date_str)
+            
+            return listings
+            
+        finally:
+            await page.close()
+    
+    def _extract_listings_from_html(self, html_content, filter_date_str):
+        """
+        Extract listing data from JSON-LD in HTML.
+        Filters listings by date.
+        
+        Args:
+            html_content: HTML content of the page
+            filter_date_str: Date string to filter listings (YYYY-MM-DD)
+            
+        Returns:
+            List of listing dictionaries
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        listings = []
+        
+        # Find all script tags with type="application/ld+json"
+        scripts = soup.find_all('script', type='application/ld+json')
+        
+        for script in scripts:
+            try:
+                data = json.loads(script.string)
+                
+                # Handle @graph structure
+                if '@graph' in data:
+                    for item in data['@graph']:
+                        if item.get('@type') == 'ItemList' and 'itemListElement' in item:
+                            # This is the listings list
+                            for element in item['itemListElement']:
+                                listing_data = self._parse_listing_data(element, filter_date_str)
+                                if listing_data:
+                                    listings.append(listing_data)
+                elif data.get('@type') == 'ItemList' and 'itemListElement' in data:
+                    # Direct ItemList structure
+                    for element in data['itemListElement']:
+                        listing_data = self._parse_listing_data(element, filter_date_str)
+                        if listing_data:
+                            listings.append(listing_data)
+            except json.JSONDecodeError:
+                continue
+        
+        return listings
+    
+    def _parse_listing_data(self, listing_element, filter_date_str):
+        """
+        Parse listing data from JSON-LD element.
+        Filters by date.
+        
+        Args:
+            listing_element: Listing element from JSON-LD
+            filter_date_str: Date string to filter listings (YYYY-MM-DD)
+            
+        Returns:
+            Dictionary with listing information or None if filtered out
+        """
+        if listing_element.get('@type') != 'RealEstateListing':
+            return None
+        
+        # Get the date published
+        date_published = listing_element.get('datePublished', '')
+        
+        # Parse the date (format: "2026-01-05T22:57:43+03:00")
+        if date_published:
+            try:
+                # Extract just the date part
+                listing_date = date_published.split('T')[0]
+                
+                # Filter by date
+                if listing_date != filter_date_str:
+                    return None
+            except:
+                return None
+        else:
+            return None
+        
+        # Extract address information
+        about = listing_element.get('about', {})
+        address = about.get('address', {})
+        
+        # Extract price from offers
+        offers = listing_element.get('offers', {})
+        price = offers.get('price', '')
+        
+        # Extract image
+        image_obj = listing_element.get('image', {})
+        image_url = image_obj.get('url', '') if isinstance(image_obj, dict) else ''
+        
+        listing_data = {
+            'name': listing_element.get('name', ''),
+            'url': listing_element.get('url', ''),
+            'description': listing_element.get('description', ''),
+            'image_url': image_url,
+            'price': price,
+            'addressRegion': address.get('addressRegion', ''),
+            'addressLocality': address.get('addressLocality', ''),
+            'datePublished': date_published,
+            'views': None  # Will be filled later
+        }
+        
+        return listing_data
+    
+    async def scrape_listing_views(self, listing_url):
+        """
+        Scrape view count from a listing detail page.
+        
+        Args:
+            listing_url: URL of the listing detail page
+            
+        Returns:
+            View count as integer or None
+        """
+        page = await self.context.new_page()
+        
+        try:
+            await page.goto(listing_url, wait_until='domcontentloaded', timeout=30000)
+            await page.wait_for_timeout(1000)
+            
+            # Get page content
+            content = await page.content()
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Find the views element
+            # The pattern is: <li class="post-info-advertising-details"> with SVG for eye icon and <span> with number
+            post_info_items = soup.find_all('li', class_='post-info-advertising-details')
+            
+            for item in post_info_items:
+                # Check if this item contains the eye SVG (viewBox="0 -960 960 960")
+                svg = item.find('svg')
+                if svg and 'viewBox' in svg.attrs and '0 -960 960 960' in svg['viewBox']:
+                    # This is the views item, get the span text
+                    span = item.find('span')
+                    if span and span.text.strip().isdigit():
+                        return int(span.text.strip())
+            
+            return None
+            
+        except Exception as e:
+            print(f"    Error getting views: {e}")
+            return None
+        finally:
+            await page.close()
+
+
+async def main():
+    """Test the scraper"""
+    scraper = OfficeScraper()
+    
+    # Scrape offices with listings from yesterday
+    offices = await scraper.scrape_all_offices()
+    
+    print(f"\n\nTotal offices with listings from yesterday: {len(offices)}")
+    for office in offices:
+        print(f"\nOffice: {office['name']}")
+        print(f"  Listings: {len(office.get('listings', []))}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
