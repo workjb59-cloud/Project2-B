@@ -321,7 +321,7 @@ class OfficeScraper:
         
         try:
             await page.goto(listing_url, wait_until='domcontentloaded', timeout=30000)
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(1500)
             
             # Get page content
             content = await page.content()
@@ -334,11 +334,26 @@ class OfficeScraper:
             for item in post_info_items:
                 # Check if this item contains the eye SVG (viewBox="0 -960 960 960")
                 svg = item.find('svg')
-                if svg and 'viewBox' in svg.attrs and '0 -960 960 960' in svg['viewBox']:
-                    # This is the views item, get the span text
-                    span = item.find('span')
-                    if span and span.text.strip().isdigit():
-                        return int(span.text.strip())
+                if svg and 'viewBox' in svg.attrs:
+                    viewbox = svg['viewBox']
+                    # Check for eye icon viewBox
+                    if '0 -960 960 960' in viewbox or viewbox == '0 -960 960 960':
+                        # This is the views item, get the span text
+                        span = item.find('span')
+                        if span:
+                            views_text = span.text.strip()
+                            # Remove any non-digit characters and convert to int
+                            views_text = ''.join(filter(str.isdigit, views_text))
+                            if views_text:
+                                return int(views_text)
+            
+            # Fallback: try to find any span with numeric content in post-info-advertising-details
+            for item in post_info_items:
+                span = item.find('span')
+                if span:
+                    text = span.text.strip()
+                    if text.isdigit():
+                        return int(text)
             
             return None
             
