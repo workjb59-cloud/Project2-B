@@ -15,6 +15,45 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from offices.OfficeScraper import OfficeScraper
 
 
+def calculate_relative_date(date_str):
+    """Calculate relative date from ISO datetime string."""
+    try:
+        dt = datetime.fromisoformat(date_str.replace('+03:00', ''))
+        now = datetime.now()
+        diff = now - dt
+        
+        if diff.days == 0:
+            hours = diff.seconds // 3600
+            if hours == 0:
+                minutes = diff.seconds // 60
+                return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        elif diff.days == 1:
+            return "yesterday"
+        elif diff.days < 7:
+            return f"{diff.days} days ago"
+        elif diff.days < 30:
+            weeks = diff.days // 7
+            return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+        elif diff.days < 365:
+            months = diff.days // 30
+            return f"{months} month{'s' if months != 1 else ''} ago"
+        else:
+            years = diff.days // 365
+            return f"{years} year{'s' if years != 1 else ''} ago"
+    except:
+        return ""
+
+
+def format_date(date_str):
+    """Format ISO datetime to simple date format."""
+    try:
+        dt = datetime.fromisoformat(date_str.replace('+03:00', ''))
+        return dt.strftime('%d-%m-%Y')
+    except:
+        return date_str
+
+
 async def test_scraper():
     """Test the office scraper"""
     print("="*80)
@@ -145,6 +184,7 @@ async def test_scraper():
                             # Create main sheet
                             main_data = []
                             for listing in test_office['listings']:
+                                date_published = listing.get('datePublished', '')
                                 main_data.append({
                                     'Name': listing.get('name', ''),
                                     'URL': listing.get('url', ''),
@@ -154,7 +194,8 @@ async def test_scraper():
                                     'Address Region': listing.get('addressRegion', ''),
                                     'Address Locality': listing.get('addressLocality', ''),
                                     'Views': listing.get('views', ''),
-                                    'Date Published': listing.get('datePublished', '')
+                                    'Date Published': format_date(date_published),
+                                    'Relative Date': calculate_relative_date(date_published)
                                 })
                             df_main = pd.DataFrame(main_data)
                             
