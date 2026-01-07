@@ -2,7 +2,7 @@ import asyncio
 import os
 from datetime import datetime
 from CategoryScraper import CategoryScraper
-from properties.S3Uploader import S3Uploader
+from S3Uploader import S3Uploader
 
 
 class MainS3Scraper:
