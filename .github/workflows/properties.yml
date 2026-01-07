@@ -1,4 +1,4 @@
-name: Daily Boshamlan Scraper
+name: Daily Properties Scraper
 
 on:
   # Run every day at 12:00 AM UTC
