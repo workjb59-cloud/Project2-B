@@ -161,7 +161,7 @@ class CategoryScraper:
             file_path = os.path.join(self.output_dir, f"{category_name}.xlsx")
             
             # Create Excel writer
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+            with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
                 for subcat_name, data in category_data.items():
                     if data:  # Only create sheet if there's data
                         # Add image_s3_path column if we have image mappings
