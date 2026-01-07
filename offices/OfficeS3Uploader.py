@@ -2,6 +2,9 @@ import boto3
 import os
 from datetime import datetime
 from botocore.exceptions import ClientError, NoCredentialsError
+import aiohttp
+import asyncio
+from urllib.parse import urlparse
 
 
 class OfficeS3Uploader:
@@ -48,7 +51,7 @@ class OfficeS3Uploader:
     
     def upload_excel_file(self, file_path, upload_date=None):
         """
-        Upload an Excel file to S3 with date partitioning.
+        Upload an Excel file to S3 with date partitioning in 'excel files' folder.
         
         Args:
             file_path: Local path to the Excel file
@@ -60,13 +63,13 @@ class OfficeS3Uploader:
         if upload_date is None:
             upload_date = datetime.now()
         
-        # Create S3 key with date partitioning
+        # Create S3 key with date partitioning and excel files folder
         year = upload_date.strftime('%Y')
         month = upload_date.strftime('%m')
         day = upload_date.strftime('%d')
         
         file_name = os.path.basename(file_path)
-        s3_key = f"{self.base_path}/year={year}/month={month}/day={day}/{file_name}"
+        s3_key = f"{self.base_path}/year={year}/month={month}/day={day}/excel files/{file_name}"
         
         try:
             # Upload file
@@ -76,6 +79,43 @@ class OfficeS3Uploader:
             # Generate S3 URL
             s3_url = f"s3://{self.bucket_name}/{s3_key}"
             print(f"Successfully uploaded to {s3_url}")
+            
+            return s3_url
+            
+        except FileNotFoundError:
+            raise Exception(f"File not found: {file_path}")
+        except ClientError as e:
+            raise Exception(f"Failed to upload to S3: {e}")
+    
+    def upload_image(self, file_path, image_name, office_folder_name, upload_date=None):
+        """
+        Upload an image file to S3 in images/office_name/ structure.
+        
+        Args:
+            file_path: Local path to the image file
+            image_name: Name for the image file in S3
+            office_folder_name: Name of the office folder
+            upload_date: Date for partitioning (default: today)
+            
+        Returns:
+            S3 URL of the uploaded image
+        """
+        if upload_date is None:
+            upload_date = datetime.now()
+        
+        # Create S3 key: images/office_name/image.jpg
+        year = upload_date.strftime('%Y')
+        month = upload_date.strftime('%m')
+        day = upload_date.strftime('%d')
+        
+        s3_key = f"{self.base_path}/year={year}/month={month}/day={day}/images/{office_folder_name}/{image_name}"
+        
+        try:
+            # Upload file
+            self.s3_client.upload_file(file_path, self.bucket_name, s3_key)
+            
+            # Generate S3 URL
+            s3_url = f"s3://{self.bucket_name}/{s3_key}"
             
             return s3_url
             
@@ -118,6 +158,62 @@ class OfficeS3Uploader:
             return True
         except ClientError:
             return False
+    folder_name, listing_index, upload_date=None):
+        """
+        Download an image from URL and upload to S3.
+        
+        Args:
+            image_url: URL of the image to download
+            office_folder_name: Name of the office folder
+            listing_index: Index of the listing (for unique naming)
+            upload_date: Date for partitioning (default: today)
+            
+        Returns:
+            S3 URL of the uploaded image or None if failed
+        """
+        if not image_url or image_url.strip() == '':
+            return None
+        
+        try:
+            # Parse the URL to get the file extension
+            parsed_url = urlparse(image_url)
+            path = parsed_url.path
+            
+            # Get file extension from URL
+            ext = os.path.splitext(path)[1]
+            if not ext or ext not in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
+                ext = '.jpg'  # Default extension
+            
+            # Create unique image name
+            image_name = f"e.replace(' ', '_')[:50]
+            image_name = f"{safe_office_name}_listing_{listing_index}{ext}"
+            
+            # Download image
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        # Create temp directory
+                        temp_dir = 'temp_images'
+                        os.makedirs(temp_dir, exist_ok=True)
+                        
+                        # Save temporarily
+                        temp_path = os.path.join(temp_dir, image_name)
+                        with open(temp_path, 'wb') as f:
+                            f.write(await response.read())
+                        
+                        # Upload to S3
+                        s3_url = self.upload_image(temp_path, image_name, upload_date)
+                        
+                        # Delete temp fileoffice_folder_name, 
+                        os.remove(temp_path)
+                        
+                        return s3_url
+                    else:
+                        print(f"    Failed to download image: HTTP {response.status}")
+                        return None
+        except Exception as e:
+            print(f"    Error downloading/uploading image: {e}")
+            return None
 
 
 def main():

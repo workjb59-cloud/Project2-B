@@ -190,7 +190,8 @@ class OfficeDataPipeline:
                 'message': 'No offices found with listings from the specified date',
                 'offices_count': 0,
                 'files_generated': 0,
-                'files_uploaded': 0
+                'files_uploaded': 0,
+                'images_uploaded': 0
             }
         
         print(f"\n✓ Found {len(offices_data)} offices with listings from {filter_date.strftime('%Y-%m-%d')}")
@@ -198,9 +199,37 @@ class OfficeDataPipeline:
         total_listings = sum(len(office.get('listings', [])) for office in offices_data)
         print(f"✓ Total listings: {total_listings}")
         
-        # Step 2: Generate Excel files
+        # Step 2: Upload images to S3
+        uploaded_images_count = 0
+        if upload_to_s3:
+            print("\n" + "="*80)
+            print("STEP 2: Uploading images to S3")
+            print("-" * 80)
+            
+            for office in offices_data:
+                office_name = office.get('name', 'Unknown')
+                office_folder_name = self._clean_filename(office_name)
+                listings = office.get('listings', [])
+                
+                for idx, listing in enumerate(listings, 1):
+                    image_url = listing.get('image_url', '')
+                    if image_url:
+                        print(f"  Uploading image {idx}/{len(listings)} for {office_name}...")
+                        s3_image_url = await self.s3_uploader.download_and_upload_image(
+                            image_url, 
+                            office_folder_name, 
+                            idx
+                        )
+                        if s3_image_url:
+                            listing['s3_image_url'] = s3_image_url
+                            uploaded_images_count += 1
+                        await asyncio.sleep(0.3)  # Rate limiting
+            
+            print(f"\n✓ Uploaded {uploaded_images_count} images to S3")
+        
+        # Step 3: Generate Excel files
         print("\n" + "="*80)
-        print("STEP 2: Generating Excel files")
+        print(f"STEP {'3' if upload_to_s3 else '2'}: Generating Excel files")
         print("-" * 80)
         
         # Create temporary directory for Excel files
@@ -217,27 +246,26 @@ class OfficeDataPipeline:
         
         print(f"\n✓ Generated {len(excel_files)} Excel files")
         
-        # Step 3: Upload to S3
+        # Step 4: Upload Excel files to S3
         uploaded_urls = []
         
         if upload_to_s3 and excel_files:
             print("\n" + "="*80)
-            print("STEP 3: Uploading to S3")
+            print("STEP 4: Uploading Excel files to S3")
             print("-" * 80)
             
             # Use the filter date for S3 partitioning
-            uploaded_urls = self.s3_uploader.upload_multiple_files(
-                excel_files, 
-                upload_date=filter_date
+            uploadeoday's date for S3 partitioning (not filter date)
+            uploaded_urls = self.s3_uploader.upload_multiple_files(excel_files    upload_date=filter_date
             )
             
             print(f"\n✓ Uploaded {len(uploaded_urls)} files to S3")
         else:
             print("\n⚠ Skipping S3 upload")
         
-        # Step 4: Cleanup
+        # Step 5: Cleanup
         print("\n" + "="*80)
-        print("STEP 4: Cleanup")
+        print(f"STEP {'5' if upload_to_s3 else '3'}: Cleanup")
         print("-" * 80)
         
         if upload_to_s3:
@@ -247,6 +275,14 @@ class OfficeDataPipeline:
                 print(f"✓ Removed temporary directory: {self.temp_dir}")
             except Exception as e:
                 print(f"⚠ Could not remove temporary directory: {e}")
+            
+            # Remove temp images directory if it exists
+            try:
+                if os.path.exists('temp_images'):
+                    shutil.rmtree('temp_images')
+                    print(f"✓ Removed temporary images directory")
+            except Exception as e:
+                print(f"⚠ Could not remove temporary images directory: {e}")
         else:
             print(f"✓ Excel files saved locally in: {self.temp_dir}")
         
@@ -258,14 +294,25 @@ class OfficeDataPipeline:
         print(f"Total listings: {total_listings}")
         print(f"Excel files generated: {len(excel_files)}")
         print(f"Files uploaded to S3: {len(uploaded_urls)}")
+        print(f"Images uploaded to S3: {uploaded_images_count}")
         
         if uploaded_urls:
             print(f"\nS3 Location:")
             # Show the directory structure
-            if uploaded_urls:
-                first_url = uploaded_urls[0]
-                s3_dir = '/'.join(first_url.split('/')[:-1])
-                print(f"  {s3_dir}/")
+            first_url = uploaded_urls[0]
+            # Remove the filename to show just the directory
+            s3_dir = '/'.join(first_url.split('/')[:-2])  # Remove 'excel files/filename'
+            print(f"  {s3_dir}/")
+            print(f"    ├── excel files/")
+            print(f"    │   ├── Office1.xlsx")
+            print(f"    │   ├── Office2.xlsx")
+            print(f"    │   └── ...")
+            print(f"    └── images/")
+            print(f"        ├── Office1/")
+            print(f"        │   ├── listing_1.jpg")
+            print(f"        │   └── ...")
+            print(f"        ├── Office2/")
+            print(f"        └── ...")
         
         print("="*80 + "\n")
         
@@ -275,6 +322,7 @@ class OfficeDataPipeline:
             'total_listings': total_listings,
             'files_generated': len(excel_files),
             'files_uploaded': len(uploaded_urls),
+            'images_uploaded': uploaded_images_count,
             'uploaded_urls': uploaded_urls,
             'local_files': excel_files if not upload_to_s3 else []
         }
