@@ -324,8 +324,8 @@ class PropertyCardScraper:
                     card_date = datetime.strptime(date_str, "%Y-%m-%d")
                     if card_date < datetime.strptime(yesterday, "%Y-%m-%d"):
                         consecutive_old += 1
-                        if consecutive_old >= 3:
-                            print("3 consecutive old cards found. Stopping scroll.")
+                        if consecutive_old >= 5:
+                            print("5 consecutive old cards found. Stopping scroll.")
                             return
                     else:
                         consecutive_old = 0
@@ -335,8 +335,8 @@ class PropertyCardScraper:
                         consecutive_old = 0  # Reset, it's a fresh card
                     else:
                         consecutive_old += 1
-                        if consecutive_old >= 3:
-                            print("3 consecutive old cards found. Stopping scroll.")
+                        if consecutive_old >= 5:
+                            print("5 consecutive old cards found. Stopping scroll.")
                             return
 
             # If not enough cards found to check, break to avoid infinite loop
