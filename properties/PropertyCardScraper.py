@@ -128,17 +128,21 @@ class PropertyCardScraper:
 
     def filter_by_relative_date(self, cards):
         """
-        Filters the cards where the relative date is in the format 'any number ساعة'.
+        Filters the cards where the relative date is in the format 'any number ساعة' or 'دقيقة' or '1 يوم'.
         """
         filtered_cards = []
         for card in cards:
             relative_date = card.get('relative_date', '') or ''
-            # Check if the relative date contains any number followed by 'ساعة' or 'دقيقة'
-            if relative_date and ('ساعة' in relative_date or 'دقيقة' in relative_date):
-                # Check if it starts with a digit
+            # Check if the relative date contains any number followed by 'ساعة', 'دقيقة', or '1 يوم'
+            if relative_date:
                 parts = relative_date.split()
                 if parts and parts[0].isdigit():
-                    filtered_cards.append(card)
+                    # Accept hours or minutes
+                    if 'ساعة' in relative_date or 'دقيقة' in relative_date:
+                        filtered_cards.append(card)
+                    # Accept only 1 day (not 2, 3, etc.)
+                    elif parts[0] == '1' and 'يوم' in relative_date:
+                        filtered_cards.append(card)
         return filtered_cards
 
     async def scrape_text(self, post, selector):
