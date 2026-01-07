@@ -124,7 +124,8 @@ class OfficeDataPipeline:
             'Email': [office_data.get('email', '')],
             'Image': [office_data.get('image', '')],
             'Instagram': [office_data.get('instagram', '')],
-            'Website': [office_data.get('website', '')]
+            'Website': [office_data.get('website', '')],
+            'Ads Number': [office_data.get('ads_number', 0)]
         }
         df_info = pd.DataFrame(info_data)
         

@@ -49,7 +49,7 @@ class OfficeScraper:
                     print(f"\n[{idx}/{len(offices_data)}] Processing office: {office['name']}")
                     
                     # Get listings for this office
-                    listings = await self.scrape_office_listings(office['url'], filter_date_str)
+                    listings, number_of_items = await self.scrape_office_listings(office['url'], filter_date_str)
                     
                     if listings:
                         print(f"  Found {len(listings)} listings from {filter_date_str}")
@@ -62,6 +62,7 @@ class OfficeScraper:
                             await asyncio.sleep(0.5)  # Rate limiting
                         
                         office['listings'] = listings
+                        office['ads_number'] = number_of_items
                         all_offices.append(office)
                     else:
                         print(f"  No listings found from {filter_date_str}, skipping office")
@@ -200,9 +201,9 @@ class OfficeScraper:
             content = await page.content()
             
             # Parse JSON-LD data
-            listings = self._extract_listings_from_html(content, filter_date_str)
+            listings, number_of_items = self._extract_listings_from_html(content, filter_date_str)
             
-            return listings
+            return listings, number_of_items
             
         finally:
             await page.close()
@@ -217,10 +218,11 @@ class OfficeScraper:
             filter_date_str: Date string to filter listings (YYYY-MM-DD)
             
         Returns:
-            List of listing dictionaries
+            Tuple of (list of listing dictionaries, total number of items)
         """
         soup = BeautifulSoup(html_content, 'html.parser')
         listings = []
+        number_of_items = 0
         
         # Find all script tags with type="application/ld+json"
         scripts = soup.find_all('script', type='application/ld+json')
@@ -234,12 +236,14 @@ class OfficeScraper:
                     for item in data['@graph']:
                         if item.get('@type') == 'ItemList' and 'itemListElement' in item:
                             # This is the listings list
+                            number_of_items = item.get('numberOfItems', 0)
                             for element in item['itemListElement']:
                                 listing_data = self._parse_listing_data(element, filter_date_str)
                                 if listing_data:
                                     listings.append(listing_data)
                 elif data.get('@type') == 'ItemList' and 'itemListElement' in data:
                     # Direct ItemList structure
+                    number_of_items = data.get('numberOfItems', 0)
                     for element in data['itemListElement']:
                         listing_data = self._parse_listing_data(element, filter_date_str)
                         if listing_data:
@@ -247,7 +251,7 @@ class OfficeScraper:
             except json.JSONDecodeError:
                 continue
         
-        return listings
+        return listings, number_of_items
     
     def _parse_listing_data(self, listing_element, filter_date_str):
         """
