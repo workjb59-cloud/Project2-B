@@ -158,7 +158,8 @@ class OfficeS3Uploader:
             return True
         except ClientError:
             return False
-    folder_name, listing_index, upload_date=None):
+    
+    async def download_and_upload_image(self, image_url, office_folder_name, listing_index, upload_date=None):
         """
         Download an image from URL and upload to S3.
         
@@ -185,8 +186,7 @@ class OfficeS3Uploader:
                 ext = '.jpg'  # Default extension
             
             # Create unique image name
-            image_name = f"e.replace(' ', '_')[:50]
-            image_name = f"{safe_office_name}_listing_{listing_index}{ext}"
+            image_name = f"listing_{listing_index}{ext}"
             
             # Download image
             async with aiohttp.ClientSession() as session:
@@ -202,9 +202,9 @@ class OfficeS3Uploader:
                             f.write(await response.read())
                         
                         # Upload to S3
-                        s3_url = self.upload_image(temp_path, image_name, upload_date)
+                        s3_url = self.upload_image(temp_path, image_name, office_folder_name, upload_date)
                         
-                        # Delete temp fileoffice_folder_name, 
+                        # Delete temp file
                         os.remove(temp_path)
                         
                         return s3_url
