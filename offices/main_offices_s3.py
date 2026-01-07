@@ -254,10 +254,8 @@ class OfficeDataPipeline:
             print("STEP 4: Uploading Excel files to S3")
             print("-" * 80)
             
-            # Use the filter date for S3 partitioning
-            uploadeoday's date for S3 partitioning (not filter date)
-            uploaded_urls = self.s3_uploader.upload_multiple_files(excel_files    upload_date=filter_date
-            )
+            # Use today's date for S3 partitioning (not filter date)
+            uploaded_urls = self.s3_uploader.upload_multiple_files(excel_files)
             
             print(f"\n✓ Uploaded {len(uploaded_urls)} files to S3")
         else:
