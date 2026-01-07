@@ -144,7 +144,8 @@ class OfficeDataPipeline:
                 'Address Locality': listing.get('addressLocality', ''),
                 'Views': listing.get('views', ''),
                 'Date Published': format_date(date_published),
-                'Relative Date': calculate_relative_date(date_published)
+                'Relative Date': calculate_relative_date(date_published),
+                'S3 Image Path': listing.get('s3_image_url', '')
             })
         df_main = pd.DataFrame(main_data)
         
