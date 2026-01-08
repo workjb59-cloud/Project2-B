@@ -85,8 +85,8 @@ class PropertyCardScraper:
                         api_data = await self.fetch_from_api(post_id)
                         
                         if api_data:
-                            # Build full URL from slug
-                            link = f"https://www.boshamlan.com{api_data.get('slug', '')}" if api_data.get('slug') else None
+                            # Build full URL from slug and append post_id
+                            link = f"https://www.boshamlan.com{api_data.get('slug', '')}/{post_id}" if api_data.get('slug') else None
                             
                             card_data = {
                                 'title': api_data.get('title_ar'),
