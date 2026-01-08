@@ -308,11 +308,34 @@ class PropertyCardScraper:
 
         # 2. Begin scrolling and checking card dates
         consecutive_old = 0
-        while True:
+        previous_height = 0
+        no_new_content_count = 0
+        max_scrolls = 50  # Safety limit
+        scroll_count = 0
+        
+        while scroll_count < max_scrolls:
+            # Get current scroll height before scrolling
+            current_height = await page.evaluate('document.body.scrollHeight')
+            
+            # Scroll to bottom
             await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-            await asyncio.sleep(2)  # Allow cards to load
+            await asyncio.sleep(3)  # Wait for content to load
+            
+            # Get new height after scrolling
+            new_height = await page.evaluate('document.body.scrollHeight')
+            
+            # Check if page height didn't change (reached actual bottom)
+            if new_height == previous_height:
+                no_new_content_count += 1
+                if no_new_content_count >= 3:  # No new content after 3 attempts
+                    print("Reached end of page (no new content loading).")
+                    break
+            else:
+                no_new_content_count = 0
+            
+            previous_height = new_height
 
-            # 3. Get all relative date elements
+            # Get all relative date elements
             date_elements = await page.query_selector_all('.rounded.text-xs.flex.items-center.gap-1')
             date_texts = []
             for elem in date_elements:
@@ -320,31 +343,33 @@ class PropertyCardScraper:
                 if txt:
                     date_texts.append(txt.strip())
 
-            # 4. Check for 3 consecutive cards with date older than yesterday
+            # Check only the LAST 10 cards for stopping condition
+            recent_dates = date_texts[-10:] if len(date_texts) >= 10 else date_texts
+            
             consecutive_old = 0
-            for date_str in date_texts:
-                # If your cards have actual date format, use this:
+            for date_str in recent_dates:
                 try:
                     card_date = datetime.strptime(date_str, "%Y-%m-%d")
                     if card_date < datetime.strptime(yesterday, "%Y-%m-%d"):
                         consecutive_old += 1
-                        if consecutive_old >= 5:
-                            print("5 consecutive old cards found. Stopping scroll.")
-                            return
                     else:
                         consecutive_old = 0
                 except ValueError:
-                    # If not a date string, fallback to your previous logic (e.g. "ساعة" or "دقيقة")
+                    # Check if it's a fresh card (hours, minutes, or 1 day)
                     if any(word in date_str for word in ['ساعة', 'دقيقة']):
                         consecutive_old = 0  # Reset, it's a fresh card
+                    elif '1 يوم' in date_str:
+                        consecutive_old = 0  # 1 day is still fresh
                     else:
                         consecutive_old += 1
-                        if consecutive_old >= 5:
-                            print("5 consecutive old cards found. Stopping scroll.")
-                            return
-
-            # If not enough cards found to check, break to avoid infinite loop
-            if len(date_texts) < 3:
-                print("Not enough cards to check for consecutive old dates.")
+            
+            # Stop if we found 5 consecutive old cards in the recent batch
+            if consecutive_old >= 5:
+                print(f"5 consecutive old cards found in last {len(recent_dates)} cards. Stopping scroll.")
                 break
+            
+            scroll_count += 1
+        
+        if scroll_count >= max_scrolls:
+            print(f"Reached maximum scroll limit ({max_scrolls} scrolls).")
 
