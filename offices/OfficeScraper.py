@@ -260,11 +260,11 @@ class OfficeScraper:
     def _parse_listing_data(self, listing_element, filter_date_str):
         """
         Parse listing data from JSON-LD element.
-        Filters by date.
+        Filters by date (yesterday onwards).
         
         Args:
             listing_element: Listing element from JSON-LD
-            filter_date_str: Date string to filter listings (YYYY-MM-DD)
+            filter_date_str: Date string to filter listings (YYYY-MM-DD) - represents yesterday
             
         Returns:
             Dictionary with listing information or None if filtered out
@@ -278,13 +278,18 @@ class OfficeScraper:
         # Parse the date (format: "2026-01-05T22:57:43+03:00")
         if date_published:
             try:
-                # Extract just the date part
-                listing_date = date_published.split('T')[0]
+                # Parse the ISO datetime
+                from datetime import datetime, timezone
+                published_dt = datetime.fromisoformat(date_published.replace('+03:00', '+00:00'))
                 
-                # Filter by date
-                if listing_date != filter_date_str:
+                # Parse filter date (yesterday at 00:00:00)
+                filter_dt = datetime.fromisoformat(filter_date_str + 'T00:00:00+00:00')
+                
+                # Filter: keep only listings from yesterday onwards
+                if published_dt < filter_dt:
                     return None
-            except:
+            except Exception as e:
+                print(f"    Failed to parse date '{date_published}': {e}")
                 return None
         else:
             return None
