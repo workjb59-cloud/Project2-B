@@ -91,11 +91,14 @@ class PropertyCardScraper:
                             # Check if property is featured (مميز)
                             is_featured = await self.check_if_featured(post)
                             
+                            # Get published date from time element
+                            date_published = await self.scrape_datetime(post)
+                            
                             card_data = {
                                 'title': api_data.get('title_ar'),
                                 'price': str(api_data.get('price', '')) if api_data.get('price') else None,
                                 'relative_date': await self.scrape_text(post, 'time span'),  # Still from HTML
-                                'date_published': api_data.get('created_at'),
+                                'date_published': date_published,
                                 'is_featured': is_featured,
                                 'description': api_data.get('description_ar'),
                                 'image_url': api_data.get('images', [{}])[0].get('path') if api_data.get('images') else None,
@@ -177,6 +180,23 @@ class PropertyCardScraper:
             # Silently fail, not critical
             pass
         return False
+    
+    async def scrape_datetime(self, post):
+        """
+        Scrape the datetime attribute from the time element.
+        
+        Returns:
+            ISO datetime string or None
+        """
+        try:
+            time_element = await post.query_selector('time[datetime]')
+            if time_element:
+                datetime_value = await time_element.get_attribute('datetime')
+                return datetime_value
+        except Exception as e:
+            # Silently fail
+            pass
+        return None
 
     async def scrape_description(self, post):
         try:
