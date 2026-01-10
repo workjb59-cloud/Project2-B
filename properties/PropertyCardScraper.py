@@ -88,11 +88,15 @@ class PropertyCardScraper:
                             # Build full URL from slug and append post_id
                             link = f"https://www.boshamlan.com{api_data.get('slug', '')}/{post_id}" if api_data.get('slug') else None
                             
+                            # Check if property is featured (مميز)
+                            is_featured = await self.check_if_featured(post)
+                            
                             card_data = {
                                 'title': api_data.get('title_ar'),
                                 'price': str(api_data.get('price', '')) if api_data.get('price') else None,
                                 'relative_date': await self.scrape_text(post, 'time span'),  # Still from HTML
                                 'date_published': api_data.get('created_at'),
+                                'is_featured': is_featured,
                                 'description': api_data.get('description_ar'),
                                 'image_url': api_data.get('images', [{}])[0].get('path') if api_data.get('images') else None,
                                 'link': link,
@@ -154,6 +158,25 @@ class PropertyCardScraper:
         except Exception as e:
             print(f"Failed to scrape {selector}: {e}")
         return None
+    
+    async def check_if_featured(self, post):
+        """
+        Check if the property has the 'مميز' (featured) tag.
+        
+        Returns:
+            True if featured, False otherwise
+        """
+        try:
+            # Look for the featured tag element containing 'مميز'
+            featured_element = await post.query_selector('div.absolute.bg-\(--sticky-tag\)')
+            if featured_element:
+                text = await featured_element.text_content()
+                if text and 'مميز' in text.strip():
+                    return True
+        except Exception as e:
+            # Silently fail, not critical
+            pass
+        return False
 
     async def scrape_description(self, post):
         try:
