@@ -113,7 +113,15 @@ class OfficeDataPipeline:
         office_name = office_data.get('name', 'Unknown Office')
         safe_name = self._clean_filename(office_name)
         
-        excel_path = os.path.join(output_dir, f"{safe_name}.xlsx")
+        # Extract unique identifier from URL to avoid filename collisions
+        office_url = office_data.get('url', '')
+        url_id = office_url.split('/')[-1] if office_url else ''
+        
+        # Combine office name with URL ID to ensure uniqueness
+        if url_id:
+            excel_path = os.path.join(output_dir, f"{safe_name}_{url_id}.xlsx")
+        else:
+            excel_path = os.path.join(output_dir, f"{safe_name}.xlsx")
         
         # Create info sheet data with columns as headers
         info_data = {
@@ -295,24 +303,6 @@ class OfficeDataPipeline:
         print(f"Excel files generated: {len(excel_files)}")
         print(f"Files uploaded to S3: {len(uploaded_urls)}")
         print(f"Images uploaded to S3: {uploaded_images_count}")
-        
-        if uploaded_urls:
-            print(f"\nS3 Location:")
-            # Show the directory structure
-            first_url = uploaded_urls[0]
-            # Remove the filename to show just the directory
-            s3_dir = '/'.join(first_url.split('/')[:-2])  # Remove 'excel files/filename'
-            print(f"  {s3_dir}/")
-            print(f"    ├── excel files/")
-            print(f"    │   ├── Office1.xlsx")
-            print(f"    │   ├── Office2.xlsx")
-            print(f"    │   └── ...")
-            print(f"    └── images/")
-            print(f"        ├── Office1/")
-            print(f"        │   ├── listing_1.jpg")
-            print(f"        │   └── ...")
-            print(f"        ├── Office2/")
-            print(f"        └── ...")
         
         print("="*80 + "\n")
         
