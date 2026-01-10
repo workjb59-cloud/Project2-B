@@ -189,13 +189,17 @@ class PropertyCardScraper:
             ISO datetime string or None
         """
         try:
+            # Try multiple selectors for the time element
             time_element = await post.query_selector('time[datetime]')
+            if not time_element:
+                time_element = await post.query_selector('time')
+            
             if time_element:
                 datetime_value = await time_element.get_attribute('datetime')
-                return datetime_value
+                if datetime_value:
+                    return datetime_value
         except Exception as e:
-            # Silently fail
-            pass
+            print(f"Failed to scrape datetime: {e}")
         return None
 
     async def scrape_description(self, post):
