@@ -92,6 +92,7 @@ class PropertyCardScraper:
                                 'title': api_data.get('title_ar'),
                                 'price': str(api_data.get('price', '')) if api_data.get('price') else None,
                                 'relative_date': await self.scrape_text(post, 'time span'),  # Still from HTML
+                                'date_published': api_data.get('created_at'),
                                 'description': api_data.get('description_ar'),
                                 'image_url': api_data.get('images', [{}])[0].get('path') if api_data.get('images') else None,
                                 'link': link,
