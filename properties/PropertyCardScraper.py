@@ -136,21 +136,31 @@ class PropertyCardScraper:
 
     def filter_by_relative_date(self, cards):
         """
-        Filters the cards where the relative date is in the format 'any number ساعة' or 'دقيقة' or '1 يوم'.
+        Filters the cards based on date_published (yesterday or today only).
         """
+        from datetime import datetime, timezone
+        
         filtered_cards = []
+        now = datetime.now(timezone.utc)
+        # Get yesterday's date at 00:00:00
+        yesterday_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=1)
+        
         for card in cards:
-            relative_date = card.get('relative_date', '') or ''
-            # Check if the relative date contains any number followed by 'ساعة', 'دقيقة', or '1 يوم'
-            if relative_date:
-                parts = relative_date.split()
-                if parts and parts[0].isdigit():
-                    # Accept hours or minutes
-                    if 'ساعة' in relative_date or 'دقيقة' in relative_date:
+            date_published = card.get('date_published')
+            
+            if date_published:
+                try:
+                    # Parse ISO datetime string (e.g., "2026-01-08T22:52:53+03:00")
+                    published_dt = datetime.fromisoformat(date_published.replace('+03:00', '+00:00'))
+                    
+                    # Keep cards from yesterday onwards (yesterday or today)
+                    if published_dt >= yesterday_start:
                         filtered_cards.append(card)
-                    # Accept only 1 day (not 2, 3, etc.)
-                    elif parts[0] == '1' and 'يوم' in relative_date:
-                        filtered_cards.append(card)
+                except Exception as e:
+                    # If parsing fails, skip this card
+                    print(f"Failed to parse date_published '{date_published}': {e}")
+                    continue
+        
         return filtered_cards
 
     async def scrape_text(self, post, selector):
