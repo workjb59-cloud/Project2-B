@@ -186,20 +186,20 @@ class OfficeDataPipeline:
         offices_data = await self.scraper.scrape_all_offices(filter_date=filter_date)
         
         if not offices_data:
-            print("\n⚠ No offices found with listings from the specified date")
+            print("\n⚠ No offices found")
             return {
                 'success': False,
-                'message': 'No offices found with listings from the specified date',
+                'message': 'No offices found',
                 'offices_count': 0,
                 'files_generated': 0,
                 'files_uploaded': 0,
                 'images_uploaded': 0
             }
         
-        print(f"\n✓ Found {len(offices_data)} offices with listings from {filter_date.strftime('%Y-%m-%d')}")
+        print(f"\n✓ Found {len(offices_data)} offices")
         
         total_listings = sum(len(office.get('listings', [])) for office in offices_data)
-        print(f"✓ Total listings: {total_listings}")
+        print(f"✓ Total listings from {filter_date.strftime('%Y-%m-%d')}: {total_listings}")
         
         # Step 2: Upload images to S3
         uploaded_images_count = 0

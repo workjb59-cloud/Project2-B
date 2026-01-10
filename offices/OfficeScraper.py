@@ -51,6 +51,9 @@ class OfficeScraper:
                     # Get listings for this office
                     listings, number_of_items = await self.scrape_office_listings(office['url'], filter_date_str)
                     
+                    # Always add office, even if no listings from filter date
+                    office['ads_number'] = number_of_items
+                    
                     if listings:
                         print(f"  Found {len(listings)} listings from {filter_date_str}")
                         
@@ -62,10 +65,11 @@ class OfficeScraper:
                             await asyncio.sleep(0.5)  # Rate limiting
                         
                         office['listings'] = listings
-                        office['ads_number'] = number_of_items
-                        all_offices.append(office)
                     else:
-                        print(f"  No listings found from {filter_date_str}, skipping office")
+                        print(f"  No listings found from {filter_date_str}")
+                        office['listings'] = []  # Empty listings list
+                    
+                    all_offices.append(office)
                     
                     # Rate limiting between offices
                     await asyncio.sleep(1)
