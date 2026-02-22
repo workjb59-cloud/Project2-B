@@ -53,9 +53,17 @@ s3://data-collection-dl/
         └── year=2026/
             └── month=01/
                 └── day=06/
-                    ├── Office_Name_1.xlsx
-                    ├── Office_Name_2.xlsx
-                    └── ...
+                    ├── excel files/
+                    │   ├── Office_Name_1.xlsx
+                    │   ├── Office_Name_2.xlsx
+                    │   └── ...
+                    └── images/
+                        ├── office_folder_1/
+                        │   ├── image1.jpg
+                        │   ├── image2.jpg
+                        │   └── ...
+                        └── office_folder_2/
+                            └── ...
 ```
 
 ## Setup
@@ -182,8 +190,8 @@ Generated Excel file: temp_offices_excel/مسكان_المتحدة_العقار�
 ================================================================================
 STEP 3: Uploading to S3
 --------------------------------------------------------------------------------
-Uploading مسكان_المتحدة_العقارية.xlsx to s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/...
-Successfully uploaded to s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/مسكان_المتحدة_العقارية.xlsx
+Uploading مسكان_المتحدة_العقارية.xlsx to s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/...
+Successfully uploaded to s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/مسكان_المتحدة_العقارية.xlsx
 ...
 
 ✓ Uploaded 15 files to S3
@@ -196,8 +204,9 @@ Total listings: 186
 Excel files generated: 15
 Files uploaded to S3: 15
 
-S3 Location:
-  s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/
+S3 Locations:
+  Excel files: s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/excel files/
+  Images: s3://data-collection-dl/boshamlan-data/offices/year=2026/month=01/day=05/images/
 ================================================================================
 
 ✓ Pipeline completed successfully!
